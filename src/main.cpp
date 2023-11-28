@@ -48,7 +48,7 @@ static camera_config_t camera_config = {
     .frame_size = FRAMESIZE_HVGA,
     .jpeg_quality = 12,
     .fb_count = 1,
-    .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
+    .grab_mode = CAMERA_GRAB_LATEST,
 };
 
 void setup() {
@@ -74,6 +74,10 @@ void setup() {
         Serial.println("Camera Init Failed");
         return;
     }
+
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
     server.serveStatic("/", LittleFS, "/");
 
@@ -121,7 +125,11 @@ void setup() {
     });
 
     server.on("/image", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(LittleFS, "/picture.data", "application/octet-stream");
+        camera_fb_t* pic = esp_camera_fb_get();
+        esp_camera_fb_return(pic);
+        pic = esp_camera_fb_get();
+        request->send_P(200, "application/octet-stream", pic->buf, pic->len);
+        esp_camera_fb_return(pic);
     });
 
     server.on("/format", HTTP_GET, [](AsyncWebServerRequest* request) {

@@ -1,47 +1,45 @@
 <script lang="ts">
-  import svelteLogo from './assets/svelte.svg'
-  import viteLogo from '/vite.svg'
-  import Counter from './lib/Counter.svelte'
+  import { onMount } from "svelte";
+
+  let canvas: HTMLCanvasElement;
+  let ctx: CanvasRenderingContext2D;
+
+  onMount(() => {
+    ctx = canvas.getContext("2d")!;
+    fetchImg();
+  });
+
+  const grayScaleToRGBAArray = (grayScale: Uint8ClampedArray) => {
+    const rgb = new Uint8ClampedArray(grayScale.length * 4);
+    for (let i = 0; i < grayScale.length; i++) {
+      rgb[i * 4] = grayScale[i];
+      rgb[i * 4 + 1] = grayScale[i];
+      rgb[i * 4 + 2] = grayScale[i];
+      rgb[i * 4 + 3] = 255;
+    }
+    return rgb;
+  };
+
+  const fetchImg = () =>
+    fetch("http://10.0.0.146/image")
+      .then((res) => res.arrayBuffer())
+      .then((buffer) => {
+        // Buffer contains raw grayscale image data, let's draw it
+        const img = new ImageData(
+          grayScaleToRGBAArray(new Uint8ClampedArray(buffer)),
+          480,
+          320
+        );
+        ctx.putImageData(img, 0, 0);
+      });
+
+  const captureImg = () => {
+    fetch("http://10.0.0.146/get").then(() => fetchImg());
+  };
 </script>
 
 <main>
-  <div>
-    <a href="https://vitejs.dev" target="_blank" rel="noreferrer">
-      <img src={viteLogo} class="logo" alt="Vite Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank" rel="noreferrer">
-      <img src={svelteLogo} class="logo svelte" alt="Svelte Logo" />
-    </a>
-  </div>
-  <h1>Vite + Svelte</h1>
+  <canvas bind:this={canvas} width="480" height="320"></canvas>
 
-  <div class="card">
-    <Counter />
-  </div>
-
-  <p>
-    Check out <a href="https://github.com/sveltejs/kit#readme" target="_blank" rel="noreferrer">SvelteKit</a>, the official Svelte app framework powered by Vite!
-  </p>
-
-  <p class="read-the-docs">
-    Click on the Vite and Svelte logos to learn more
-  </p>
+  <button on:click={captureImg}>Get new image</button>
 </main>
-
-<style>
-  .logo {
-    height: 6em;
-    padding: 1.5em;
-    will-change: filter;
-    transition: filter 300ms;
-  }
-  .logo:hover {
-    filter: drop-shadow(0 0 2em #646cffaa);
-  }
-  .logo.svelte:hover {
-    filter: drop-shadow(0 0 2em #ff3e00aa);
-  }
-  .read-the-docs {
-    color: #888;
-  }
-</style>
