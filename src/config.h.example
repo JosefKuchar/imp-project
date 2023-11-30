@@ -1,0 +1,4 @@
+#pragma once
+
+#define WIFI_NAME "Wifi name"
+#define WIFI_PASS "password"

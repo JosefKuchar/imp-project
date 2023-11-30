@@ -8,6 +8,7 @@
 #include <WiFiUdp.h>
 #include <esp_task_wdt.h>
 #include "camera_config.h"
+#include "config.h"
 #include "esp_camera.h"
 #include "image_manipulation.h"
 #include "model_data.h"
@@ -105,7 +106,7 @@ void setup() {
     }
 
     // Connect to WiFi
-    WiFi.begin("O2-Internet-223", "6JAK3HFN46");
+    WiFi.begin(WIFI_NAME, WIFI_PASS);
     while (WiFi.waitForConnectResult() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
