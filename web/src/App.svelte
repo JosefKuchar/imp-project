@@ -31,7 +31,7 @@
   };
 
   const fetchConfiguration = () =>
-    fetch("http://10.0.0.146/config.json")
+    fetch("/config.json")
       .then((res) => res.json())
       .then((c) => {
         rectangles = c["rectangles"];
@@ -39,7 +39,7 @@
       });
 
   const fetchImg = () =>
-    fetch("http://10.0.0.146/api/image")
+    fetch("/api/image")
       .then((res) => res.arrayBuffer())
       .then((b) => {
         // Save buffer for later
@@ -53,7 +53,7 @@
       });
 
   const inferenceImg = () =>
-    fetch("http://10.0.0.146/api/inference")
+    fetch("/api/inference")
       .then((res) => res.arrayBuffer())
       .then((b) => {
         // Save buffer for later
@@ -67,7 +67,7 @@
       });
 
   const fetchLog = () => {
-    fetch("http://10.0.0.146/log.txt")
+    fetch("/log.txt")
       .then((res) => res.text())
       .then((t) => {
         log = t;
@@ -106,9 +106,15 @@
   };
 
   const resetLog = () => {
-    fetch("http://10.0.0.146/api/log", { method: "DELETE" }).then(() =>
-      fetchLog()
-    );
+    fetch("/api/log", { method: "DELETE" }).then(() => fetchLog());
+  };
+
+  const startCapture = () => {
+    fetch("/api/start", { method: "POST" });
+  };
+
+  const stopCapure = () => {
+    fetch("/api/stop", { method: "POST" });
   };
 
   const onMouseDown: MouseEventHandler<HTMLCanvasElement> = (e) => {
@@ -153,7 +159,7 @@
   // Cors is disabled on the server, so we need to send the data to the server
   const uploadConfiguration = () => {
     orgRectangleLength = rectangles.length;
-    fetch("http://10.0.0.146/api/upload-config", {
+    fetch("/api/upload-config", {
       method: "POST",
       mode: "cors",
       headers: {
@@ -216,6 +222,8 @@
       <button on:click={fetchImg} class="btn">Get new image</button>
       <button on:click={inferenceImg} class="btn">Inference</button>
       <button on:click={resetLog} class="btn">Reset log</button>
+      <button on:click={startCapture} class="btn">Start capture</button>
+      <button on:click={stopCapure} class="btn">Stop capture</button>
     </div>
     <div>
       <h2 class="text-xl">Log</h2>
