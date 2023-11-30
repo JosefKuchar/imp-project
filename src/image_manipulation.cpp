@@ -43,6 +43,6 @@ void scale(in_image_t* src, out_image_t* dst, unsigned int newWidth, unsigned in
         uint8_t c01 = getpixel(src, gxi, gyi + 1);
         uint8_t c11 = getpixel(src, gxi + 1, gyi + 1);
         uint8_t result = (uint8_t)blerp(c00, c10, c01, c11, gx - gxi, gy - gyi);
-        putpixel(dst, x, y, result > 220 ? 255 : 0);
+        putpixel(dst, x, y, result);
     }
 }

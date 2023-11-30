@@ -3,20 +3,20 @@
   import type { MouseEventHandler } from "svelte/elements";
 
   let canvas: HTMLCanvasElement;
+  let canvas2: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D;
+  let ctx2: CanvasRenderingContext2D;
   let start: { x: number; y: number } | null = null;
-
-  let config: {
-    rectangles: { x: number; y: number; width: number; height: number }[];
-  } = {
-    rectangles: [],
-  };
+  let rectangles: { x: number; y: number; width: number; height: number }[] =
+    [];
   let buffer: ArrayBuffer;
   let log: string = "";
+  let orgRectangleLength = 0;
 
   onMount(() => {
     ctx = canvas.getContext("2d")!;
-    fetchConfiguation().then(() => fetchImg());
+    ctx2 = canvas2.getContext("2d")!;
+    fetchConfiguration().then(() => fetchImg());
   });
 
   const grayScaleToRGBAArray = (grayScale: Uint8ClampedArray) => {
@@ -30,13 +30,30 @@
     return rgb;
   };
 
-  const fetchConfiguation = () =>
+  const fetchConfiguration = () =>
     fetch("http://10.0.0.146/config.json")
       .then((res) => res.json())
-      .then((c) => (config = c));
+      .then((c) => {
+        rectangles = c["rectangles"];
+        orgRectangleLength = rectangles.length;
+      });
 
   const fetchImg = () =>
-    fetch("http://10.0.0.146/image")
+    fetch("http://10.0.0.146/api/image")
+      .then((res) => res.arrayBuffer())
+      .then((b) => {
+        // Save buffer for later
+        buffer = b;
+        // Buffer contains raw grayscale image data, let's draw it
+        drawBuffer();
+        // Draw rectangles
+        drawRectangles();
+        // Fetch log
+        fetchLog();
+      });
+
+  const inferenceImg = () =>
+    fetch("http://10.0.0.146/api/inference")
       .then((res) => res.arrayBuffer())
       .then((b) => {
         // Save buffer for later
@@ -58,8 +75,21 @@
   };
 
   const drawBuffer = () => {
+    console.log(orgRectangleLength);
+    for (let i = 0; i < orgRectangleLength; i++) {
+      const img = new ImageData(
+        grayScaleToRGBAArray(
+          new Uint8ClampedArray(buffer.slice(i * 28 * 28, (i + 1) * 28 * 28))
+        ),
+        28,
+        28
+      );
+      ctx2.putImageData(img, i * 28, 0);
+    }
     const img = new ImageData(
-      grayScaleToRGBAArray(new Uint8ClampedArray(buffer)),
+      grayScaleToRGBAArray(
+        new Uint8ClampedArray(buffer.slice(28 * 28 * orgRectangleLength))
+      ),
       480,
       320
     );
@@ -67,12 +97,18 @@
   };
 
   const drawRectangles = () => {
-    config.rectangles.forEach((r) => {
+    rectangles.forEach((r) => {
       ctx.beginPath();
       ctx.rect(r.x, r.y, r.width, r.height);
       ctx.strokeStyle = "red";
       ctx.stroke();
     });
+  };
+
+  const resetLog = () => {
+    fetch("http://10.0.0.146/api/log", { method: "DELETE" }).then(() =>
+      fetchLog()
+    );
   };
 
   const onMouseDown: MouseEventHandler<HTMLCanvasElement> = (e) => {
@@ -84,18 +120,13 @@
 
     if (start) {
       // Add rectangle to list
-      config = {
-        ...config,
-        rectangles: [
-          ...config.rectangles,
-          {
-            x: start.x,
-            y: start.y,
-            width: end.x - start.x,
-            height: end.y - start.y,
-          },
-        ],
-      };
+      rectangles.push({
+        x: start.x,
+        y: start.y,
+        width: end.x - start.x,
+        height: end.y - start.y,
+      });
+      rectangles = rectangles;
       // Draw a rectangle
       ctx.beginPath();
       ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
@@ -112,10 +143,7 @@
     width: number;
     height: number;
   }) => {
-    config = {
-      ...config,
-      rectangles: config.rectangles.filter((r) => r !== rect),
-    };
+    rectangles = rectangles.filter((r) => r !== rect);
 
     // Redraw image
     drawBuffer();
@@ -124,26 +152,35 @@
 
   // Cors is disabled on the server, so we need to send the data to the server
   const uploadConfiguration = () => {
+    orgRectangleLength = rectangles.length;
     fetch("http://10.0.0.146/api/upload-config", {
       method: "POST",
       mode: "cors",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(config),
+      body: JSON.stringify({ rectangles }),
     });
   };
 </script>
 
 <main class="container mx-auto p-6">
   <div class="flex items-start gap-6">
-    <canvas
-      bind:this={canvas}
-      width="480"
-      height="320"
-      on:mousedown={onMouseDown}
-      on:mouseup={onMouseUp}
-    ></canvas>
+    <div>
+      <canvas
+        bind:this={canvas}
+        width="480"
+        height="320"
+        on:mousedown={onMouseDown}
+        on:mouseup={onMouseUp}
+      ></canvas>
+      <canvas
+        bind:this={canvas2}
+        width={28 * rectangles.length}
+        height="28"
+        class="w-full"
+      ></canvas>
+    </div>
     <div>
       <h2 class="text-xl">Rectangles</h2>
       <table class="table">
@@ -157,7 +194,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each config.rectangles as rect}
+          {#each rectangles as rect}
             <tr>
               <td>{rect.x}</td>
               <td>{rect.y}</td>
@@ -177,6 +214,8 @@
         >Upload configuration</button
       >
       <button on:click={fetchImg} class="btn">Get new image</button>
+      <button on:click={inferenceImg} class="btn">Inference</button>
+      <button on:click={resetLog} class="btn">Reset log</button>
     </div>
     <div>
       <h2 class="text-xl">Log</h2>
