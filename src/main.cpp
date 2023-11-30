@@ -1,9 +1,16 @@
 #include <Arduino.h>
+#include <AsyncJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <WiFi.h>
+#include <esp_task_wdt.h>
 #include "esp_camera.h"
+#include "image_manipulation.h"
+#include "model_data.h"
+#include "soc/rtc_wdt.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 
 #define CAM_PIN_PWDN 32
 #define CAM_PIN_RESET -1
@@ -51,6 +58,56 @@ static camera_config_t camera_config = {
     .grab_mode = CAMERA_GRAB_LATEST,
 };
 
+std::unique_ptr<tflite::MicroInterpreter> interpreter;
+#define ARENA_SIZE 1024 * 32
+uint8_t tensor_arena[ARENA_SIZE];
+
+struct rectangle_t {
+    unsigned int x;
+    unsigned int y;
+    unsigned int width;
+    unsigned int height;
+};
+
+struct config_t {
+    std::vector<rectangle_t> rectangles;
+};
+
+config_t config;
+
+config_t parseConfig() {
+    // Load config from LittleFS
+    File file = LittleFS.open("/config.json", FILE_READ);
+    if (!file) {
+        Serial.println("Failed to open file in reading mode");
+        return {};
+    }
+
+    StaticJsonDocument<768> doc;
+
+    // Parse config
+    DeserializationError error = deserializeJson(doc, file);
+    if (error) {
+        Serial.println("Failed to parse config");
+        return {};
+    }
+
+    config_t config;
+    // Parse rectangles
+    for (JsonObject rectangle : doc["rectangles"].as<JsonArray>()) {
+        unsigned rectangle_x = rectangle["x"];
+        unsigned rectangle_y = rectangle["y"];
+        unsigned rectangle_width = rectangle["width"];
+        unsigned rectangle_height = rectangle["height"];
+        config.rectangles.push_back({.x = rectangle_x,
+                                     .y = rectangle_y,
+                                     .width = rectangle_width,
+                                     .height = rectangle_height});
+    }
+    file.close();
+    return config;
+}
+
 void setup() {
     // Setup serial
     Serial.begin(115200);
@@ -75,6 +132,92 @@ void setup() {
         return;
     }
 
+    // Setup model
+    const tflite::Model* model = tflite::GetModel(tmnist_model_tflite);
+    if (model->version() != TFLITE_SCHEMA_VERSION) {
+        Serial.print("Model provided is schema version ");
+        Serial.print(model->version());
+        Serial.print(" not equal to supported version ");
+        Serial.println(TFLITE_SCHEMA_VERSION);
+    }
+
+    // Add resolver
+    static tflite::MicroMutableOpResolver<8> resolver;
+    resolver.AddReadVariable();
+    resolver.AddQuantize();
+    resolver.AddFullyConnected();
+    resolver.AddSoftmax();
+    resolver.AddDequantize();
+    resolver.AddConv2D();
+    resolver.AddMaxPool2D();
+    resolver.AddReshape();
+
+    // Build interpreter
+    static tflite::MicroInterpreter static_interpreter(model, resolver, tensor_arena, ARENA_SIZE);
+    interpreter = std::move(std::unique_ptr<tflite::MicroInterpreter>(&static_interpreter));
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        Serial.println("Failed to allocate tensors");
+        return;
+    } else {
+        Serial.println("Successfully allocated tensors");
+        Serial.print("Used bytes: ");
+        Serial.println(interpreter->arena_used_bytes());
+    }
+
+    config = parseConfig();
+
+    // // Obtain a pointer to the model's input tensor
+    // TfLiteTensor* input = interpreter->input(0);
+
+    // // Print out the input tensor's details to verify
+    // // the model is working as expected
+    // Serial.print("Input size: ");
+    // Serial.println(input->dims->size);
+    // Serial.print("Input bytes: ");
+    // Serial.println(input->bytes);
+
+    // for (int i = 0; i < input->dims->size; i++) {
+    //     Serial.print("Input dim ");
+    //     Serial.print(i);
+    //     Serial.print(": ");
+    //     Serial.println(input->dims->data[i]);
+    // }
+
+    // // Set input data
+    // for (int i = 0; i < 784; i++) {
+    //     input->data.f[i] = input_data[i];
+    // }
+
+    // // Run inference
+    // if (interpreter->Invoke() != kTfLiteOk) {
+    //     Serial.println("Failed to invoke tflite");
+    //     return;
+    // }
+
+    // // Obtain a pointer to the output tensor
+    // TfLiteTensor* output = interpreter->output(0);
+
+    // // Print out the output tensor's details to verify
+    // // the model is working as expected
+    // Serial.print("Output size: ");
+    // Serial.println(output->dims->size);
+    // Serial.print("Output bytes: ");
+    // Serial.println(output->bytes);
+
+    // for (int i = 0; i < output->dims->size; i++) {
+    //     Serial.print("Output dim ");
+    //     Serial.print(i);
+    //     Serial.print(": ");
+    //     Serial.println(output->dims->data[i]);
+    // }
+
+    // for (int i = 0; i < 10; i++) {
+    //     Serial.print("Output data ");
+    //     Serial.print(i);
+    //     Serial.print(": ");
+    //     Serial.println(output->data.f[i]);
+    // }
+
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
@@ -89,46 +232,157 @@ void setup() {
         request->send(response);
     });
 
-    server.on("/get", HTTP_GET, [](AsyncWebServerRequest* request) {
-        camera_fb_t* pic = esp_camera_fb_get();
+    server.on(
+        "/api/upload-config", HTTP_POST,
+        [](AsyncWebServerRequest* request) { Serial.println("Received request to upload config"); },
+        nullptr,
+        [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            Serial.printf("Received %d bytes of data\n", len);
+            // Save request body json to LittleFS
+            File file = LittleFS.open("/config.json", FILE_WRITE);
+            if (!file) {
+                Serial.println("Failed to open file in writing mode");
+                request->send(200, "text/plain", "Failed to open file in writing mode");
+                return;
+            }
+            // Write to file
+            while (!file.write(data, len)) {
+                Serial.println("Failed to write to file");
+            }
+            file.flush();
+            file.close();
+            Serial.println("Written to config");
 
-        if (!pic) {
-            Serial.println("Camera Capture Failed");
-            request->send(200, "text/plain", "Camera Capture Failed");
-            return;
-        }
-
-        Serial.println("Camera Capture Succeeded");
-
-        // Save picture to LittleFS
-        File file = LittleFS.open("/picture.data", FILE_WRITE);
-        if (!file) {
-            Serial.println("Failed to open file in writing mode");
-            request->send(200, "text/plain", "Failed to open file in writing mode");
-            return;
-        }
-
-        while (!file.write(pic->buf, pic->len)) {
-            Serial.println("Failed to write to file");
-        }
-        file.flush();
-        file.close();
-
-        // Print pic params
-        Serial.printf("Picture params: width: %d, height: %d, format: %d, len: %d\n", pic->width,
-                      pic->height, pic->format, pic->len);
-        Serial.printf("Saved file to path: %s\n", "/picture.data");
-
-        esp_camera_fb_return(pic);
-
-        request->send(200, "text/plain", "Camera Capture Succeeded");
-    });
+            // Parse config
+            config = parseConfig();
+            request->send(200, "text/plain", "Config saved");
+        });
 
     server.on("/image", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String value = "";
+
+        // Begin response
+        uint8_t out_image_data[28 * 28] = {0};
+        out_image_t out_image = {
+            .pixels = out_image_data,
+            .w = 28,
+            .h = 28,
+        };
         camera_fb_t* pic = esp_camera_fb_get();
         esp_camera_fb_return(pic);
         pic = esp_camera_fb_get();
+
+        // Loop through all rectangles
+        for (auto rectangle : config.rectangles) {
+            in_image_t in_image = {
+                .pixels = pic->buf,
+                .w = pic->width,
+                .h = pic->height,
+                .offsetX = rectangle.x,
+                .offsetY = rectangle.y,
+                .sectionWidth = rectangle.width,
+                .sectionHeight = rectangle.height,
+            };
+            scale(&in_image, &out_image, 28, 28);
+
+            // Obtain a pointer to the model's input tensor
+            TfLiteTensor* input = interpreter->input(0);
+
+            // Set input data
+            for (int i = 0; i < 784; i++) {
+                input->data.f[i] = out_image_data[i] / 255.0;
+            }
+
+            // Run inference
+            if (interpreter->Invoke() != kTfLiteOk) {
+                Serial.println("Failed to invoke tflite");
+                return;
+            }
+
+            // Obtain a pointer to the output tensor
+            TfLiteTensor* output = interpreter->output(0);
+
+            // Print out the output tensor's details to verify
+            int max_index = 0;
+            float max_value = 0;
+            for (int i = 0; i < 10; i++) {
+                if (output->data.f[i] > max_value) {
+                    max_value = output->data.f[i];
+                    max_index = i;
+                }
+            }
+            value += String(max_index);
+        }
+
+        File file = LittleFS.open("/log.txt", FILE_APPEND);
+        if (!file) {
+            Serial.println("Failed to open log");
+            return;
+        }
+        file.println(value);
+        file.close();
+
         request->send_P(200, "application/octet-stream", pic->buf, pic->len);
+        esp_camera_fb_return(pic);
+    });
+
+    server.on("/image2", HTTP_GET, [](AsyncWebServerRequest* request) {
+        AsyncResponseStream* response = request->beginResponseStream("application/octet-stream");
+
+        uint8_t out_image_data[28 * 28] = {0};
+        out_image_t out_image = {
+            .pixels = out_image_data,
+            .w = 28,
+            .h = 28,
+        };
+        camera_fb_t* pic = esp_camera_fb_get();
+        esp_camera_fb_return(pic);
+        pic = esp_camera_fb_get();
+
+        // Loop through all rectangles
+        for (auto rectangle : config.rectangles) {
+            in_image_t in_image = {
+                .pixels = pic->buf,
+                .w = pic->width,
+                .h = pic->height,
+                .offsetX = rectangle.x,
+                .offsetY = rectangle.y,
+                .sectionWidth = rectangle.width,
+                .sectionHeight = rectangle.height,
+            };
+            scale(&in_image, &out_image, 28, 28);
+
+            // Obtain a pointer to the model's input tensor
+            TfLiteTensor* input = interpreter->input(0);
+
+            // Set input data
+            for (int i = 0; i < 784; i++) {
+                input->data.f[i] = out_image_data[i] / 255.0;
+            }
+
+            // Run inference
+            if (interpreter->Invoke() != kTfLiteOk) {
+                Serial.println("Failed to invoke tflite");
+                return;
+            }
+
+            // Obtain a pointer to the output tensor
+            TfLiteTensor* output = interpreter->output(0);
+
+            // Print out the output tensor's details to verify
+            for (int i = 0; i < 10; i++) {
+                Serial.print("Output data ");
+                Serial.print(i);
+                Serial.print(": ");
+                Serial.println(output->data.f[i]);
+            }
+
+            response->write(out_image_data, 28 * 28);
+
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        request->send(response);
         esp_camera_fb_return(pic);
     });
 
@@ -147,9 +401,17 @@ void setup() {
         request->send(200, "text/plain", response);
     });
 
+    server.onNotFound([](AsyncWebServerRequest* request) {
+        if (request->method() == HTTP_OPTIONS) {
+            request->send(200);
+        } else {
+            request->send(404);
+        }
+    });
+
     server.begin();
 }
 
 void loop() {
-    // put your main code here, to run repeatedly:
+    vTaskDelete(NULL);
 }
