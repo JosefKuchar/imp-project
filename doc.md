@@ -4,6 +4,17 @@ S - ARM@FITkit3, ESP32 či jiný HW: Demo aplikace strojového učení (pomocí 
 
 Autor: Josef Kuchař (xkucha28)
 
+## Úvod do problému
+
+Cílem toho projektu je automatický odečet hodnot z plynoměru. Kontrolní odečty se hodí při změně smlouvy, zafixování cen a podobně. Pro uživatele je jednodušší, když je tato činnost automatizovaná a nemusí tak na ní myslet.
+
+Automatický odečet lze u plynoměru dělat dvěma způsoby:
+
+1. Opticky, například kamerou
+2. Snímáním magnetických impulzů (1 puls = 0,01 m³) například pomocí hallové sondy
+
+## Popis řešení
+
 ## Struktura projektu
 
 Popis zajímavých částí struktury projektu
