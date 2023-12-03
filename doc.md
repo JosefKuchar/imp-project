@@ -13,9 +13,17 @@ Automatický odečet lze u plynoměru dělat dvěma způsoby:
 1. Opticky, například kamerou
 2. Snímáním magnetických impulzů (1 puls = 0,01 m³) například pomocí hallové sondy
 
+V tomto projektu jsem zvolil možnost první. Je tomu tak z důvodu, že všechny zařízení nemusí generovat magnetické pulzy, je třeba nastavit počáteční offset a žádný puls se nesmí vynechat, jinak dojde k odchylce od reálné hodnoty. Druhý důvod je samozřejmě splnění zadání a to využítí strojového učení.
+
+Moje řešení také vyžaduje počáteční nastavení, avšak poté již uživatel nemusí nijak zasahovat a vždy se čte celá absolutní hodnota.
+
+Uživatel vhodně umístí zařízení, aby kamera směrovala na daný plynoměr a poté veškeré nastavení dělá na dálku. Pomocí webového prohlížeče navštíví IP adresu zařízení
+
 ## Popis řešení
 
-## Struktura projektu
+Projekt se dělí na dvě části.
+
+### Struktura projektu
 
 Popis zajímavých částí struktury projektu
 
