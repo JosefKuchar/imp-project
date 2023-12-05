@@ -37,11 +37,46 @@ Na mikrokontroleru běží web server, který zpřístupňuje jednoduché webov�
 
 Obrázky z kamery jsou získávány pomocí driveru esp_camera. Pro jednoduchou práci s vyfocenými obrázky pracuje kamera v režimu Grayscale 1BPP (černobílý 8bit obrázek). Je zvoleno rozlišení 480x320.
 
+\pagebreak
+
 #### Rozpoznávání číslic
 
 Pro rozpoznávání číslic je použit natrénovaný model konvoluční neuronové sítě. Model je převeden do formátu TFLite. Model je uložen v souboru `model_data.cc` a je načítán při startu aplikace. Běhové rozhraní modelu je implementováno pomocí knihovny Tensorflow Lite for Microcontrollers.
 
 Při příchodu požadavku na rozpoznání číslic je vyfocen obrázek z kamery. Z obrázku se získají části obsahující číslice pomocí nastavených souřadnic. Tyto části jsou zmenšeny (nebo zvětšeny) na rozlišení 28x28 pomocí bilineární interpolace. Zmenšené části jsou převedeny na float formát a následně předány modelu. Takto je zpracovaná každá číslice. Celý výsledek je pak převeden na jedno číslo.
+
+Model je natrénován na datasetu TMNIST. Architektura modelu je:
+
+```
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #
+=================================================================
+ conv2d (Conv2D)             (None, 25, 25, 32)        544
+
+ max_pooling2d (MaxPooling2  (None, 12, 12, 32)        0
+ D)
+
+ conv2d_1 (Conv2D)           (None, 10, 10, 64)        18496
+
+ max_pooling2d_1 (MaxPoolin  (None, 5, 5, 64)          0
+ g2D)
+
+ dropout (Dropout)           (None, 5, 5, 64)          0
+
+ flatten (Flatten)           (None, 1600)              0
+
+ dense (Dense)               (None, 128)               204928
+
+ dense_1 (Dense)             (None, 50)                6450
+
+ dense_2 (Dense)             (None, 10)                510
+
+=================================================================
+Total params: 230928 (902.06 KB)
+Trainable params: 230928 (902.06 KB)
+Non-trainable params: 0 (0.00 Byte)
+_________________________________________________________________
+```
 
 #### Souborový systém
 
